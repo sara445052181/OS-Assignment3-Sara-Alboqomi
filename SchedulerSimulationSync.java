@@ -38,6 +38,8 @@ class SharedResources {
 
     // TODO #1: Add a ReentrantLock(s) here to protect critical sections
     // Example: public static final ReentrantLock lock = new ReentrantLock();
+    // Added lock for protecting shared counters
+    public static final ReentrantLock counterLock = new ReentrantLock();
 
     // TODO #2: Add a Semaphore to limit concurrent process execution
     // Example: public static final Semaphore cpuSemaphore = new Semaphore(1);
@@ -46,6 +48,12 @@ class SharedResources {
     public static void incrementContextSwitch() {
         // TODO: Protect this critical section with a lock
         // RACE CONDITION: Multiple threads might read and write simultaneously!
+        counterLock.lock();
+        try {
+            contextSwitchCount++;
+        } finally {
+            counterLock.unlock();
+        }
         contextSwitchCount++;
     }
 
@@ -58,6 +66,12 @@ class SharedResources {
     // Method to add waiting time
     public static void addWaitingTime(long time) {
         // TODO: Protect this critical section with a lock
+        counterLock.lock();
+        try {
+            totalWaitingTime += time;
+        } finally {
+            counterLock.unlock();
+        }
         totalWaitingTime += time;
     }
 
