@@ -1,3 +1,7 @@
+
+// Added imports for synchronization classes
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.Semaphore;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Map;
@@ -25,73 +29,70 @@ class Colors {
     public static final String BRIGHT_GREEN = "\u001B[92m";
 }
 
-// ⚠️ SHARED RESOURCES - These need synchronization! ⚠️
+// SHARED RESOURCES - These need synchronization!
 class SharedResources {
-    // TODO: Students will add synchronization mechanisms here
-    // HINT: Use ReentrantLock for mutual exclusion
-    // HINT: Use Semaphore for limiting concurrent access
+    public static int contextSwitchCount = 0;
+    public static int completedProcessCount = 0;
+    public static long totalWaitingTime = 0;
+    public static List<String> executionLog = new ArrayList<>();
 
-    public static int contextSwitchCount = 0; // Shared counter - NEEDS PROTECTION!
-    public static int completedProcessCount = 0; // Shared counter - NEEDS PROTECTION!
-    public static long totalWaitingTime = 0; // Shared accumulator - NEEDS PROTECTION!
-    public static List<String> executionLog = new ArrayList<>(); // Shared list - NEEDS PROTECTION!
+    // Task 1: ReentrantLock to protect shared counter variables
+    public static final ReentrantLock lock = new ReentrantLock();
 
-    // TODO #1: Add a ReentrantLock(s) here to protect critical sections
-    // Example: public static final ReentrantLock lock = new ReentrantLock();
-    // Added lock for protecting shared counters
-    public static final ReentrantLock counterLock = new ReentrantLock();
-    // Added lock for execution log
+    // Task 2: Separate ReentrantLock to protect the execution log ArrayList
     public static final ReentrantLock logLock = new ReentrantLock();
-    // TODO #2: Add a Semaphore to limit concurrent process execution
 
-    // Added semaphore to control CPU access
+    // Task 3: Binary Semaphore with 1 permit to allow only one process on CPU at a
+    // time
     public static final Semaphore cpuSemaphore = new Semaphore(1);
-
-    // Example: public static final Semaphore cpuSemaphore = new Semaphore(1);
 
     // Method to increment context switch counter
     public static void incrementContextSwitch() {
-        // TODO: Protect this critical section with a lock
-        logLock.lock();
-        try {
-            executionLog.add(message);
-        } finally {
-            logLock.unlock();
-        }
-
-        // RACE CONDITION: Multiple threads might read and write simultaneously!
-        counterLock.lock();
+        // Acquire lock before entering critical section to prevent race condition
+        lock.lock();
         try {
             contextSwitchCount++;
         } finally {
-            counterLock.unlock();
+            // Always release lock in finally block to prevent deadlocks
+            lock.unlock();
         }
-        contextSwitchCount++;
     }
 
     // Method to increment completed process counter
     public static void incrementCompletedProcess() {
-        // TODO: Protect this critical section with a lock
-        completedProcessCount++;
+        // Acquire lock before entering critical section to prevent race condition
+        lock.lock();
+        try {
+            completedProcessCount++;
+        } finally {
+            // Always release lock in finally block to prevent deadlocks
+            lock.unlock();
+        }
     }
 
     // Method to add waiting time
     public static void addWaitingTime(long time) {
-        // TODO: Protect this critical section with a lock
-        counterLock.lock();
+        // Acquire lock before entering critical section to prevent race condition
+        lock.lock();
         try {
             totalWaitingTime += time;
         } finally {
-            counterLock.unlock();
+            // Always release lock in finally block to prevent deadlocks
+            lock.unlock();
         }
-        totalWaitingTime += time;
     }
 
     // Method to log execution
     public static void logExecution(String message) {
-        // TODO: Protect this critical section with a lock
-        // RACE CONDITION: ArrayList is not thread-safe!
-        executionLog.add(message);
+        // Acquire logLock before modifying ArrayList to prevent
+        // ConcurrentModificationException
+        logLock.lock();
+        try {
+            executionLog.add(message);
+        } finally {
+            // Always release lock in finally block to prevent deadlocks
+            logLock.unlock();
+        }
     }
 }
 
@@ -104,7 +105,7 @@ class Process implements Runnable {
     private long creationTime;
     private long startTime;
     private long completionTime;
-    private int priority; // From Assignment 1
+    private int priority;
 
     public Process(String name, int burstTime, int timeQuantum, int priority) {
         this.name = name;
@@ -118,16 +119,20 @@ class Process implements Runnable {
 
     @Override
     public void run() {
-        // TODO #3: Acquire CPU semaphore before executing
-        SharedResources.cpuSemaphore.acquire();
-        // This ensures only allowed number of processes run simultaneously
+        // Task 3: Acquire CPU semaphore before executing to ensure only one process
+        // runs at a time
+        try {
+            SharedResources.cpuSemaphore.acquire();
+        } catch (InterruptedException e) {
+            System.out.println(Colors.RED + "  Process " + name + " interrupted while waiting for CPU." + Colors.RESET);
+            return;
+        }
 
         try {
             if (startTime == -1) {
                 startTime = System.currentTimeMillis();
             }
 
-            // Increment context switch counter
             SharedResources.incrementContextSwitch();
 
             int runTime = Math.min(timeQuantum, remainingTime);
@@ -136,7 +141,6 @@ class Process implements Runnable {
             String message = "  ▶ " + name + " (Priority: " + priority + ") executing quantum [" + runTime + "ms]";
             System.out.println(Colors.BRIGHT_GREEN + message + Colors.RESET);
 
-            // Log execution
             SharedResources.logExecution(name + " started quantum execution");
 
             try {
@@ -182,10 +186,8 @@ class Process implements Runnable {
             System.out.println();
 
         } finally {
-            // TODO #4: Release CPU semaphore here
-
+            // Task 3: Release CPU semaphore to allow the next process to acquire the CPU
             SharedResources.cpuSemaphore.release();
-            // Always release in finally block to prevent deadlocks!
         }
     }
 
@@ -204,9 +206,7 @@ class Process implements Runnable {
     }
 
     public void runToCompletion() {
-        // TODO: Similar synchronization needed here
         try {
-            SharedResources.cpuSemaphore.acquire();
             System.out.println(Colors.BRIGHT_CYAN + "  ⚡ " + Colors.BOLD + Colors.CYAN + name +
                     Colors.RESET + Colors.BRIGHT_CYAN + " is the last process, running to completion" +
                     Colors.RESET + " [" + remainingTime + "ms]");
@@ -223,9 +223,6 @@ class Process implements Runnable {
             System.out.println();
         } catch (InterruptedException e) {
             System.out.println(Colors.RED + "  ✗ " + name + " was interrupted." + Colors.RESET);
-
-        } finally {
-            SharedResources.cpuSemaphore.release();
         }
     }
 
@@ -259,8 +256,7 @@ class Process implements Runnable {
 
 public class SchedulerSimulationSync {
     public static void main(String[] args) {
-        // ⚠️ IMPORTANT: Put your student ID here
-        int studentID = 445052181; // ← CHANGE THIS TO YOUR ACTUAL STUDENT ID
+        int studentID = 445052181;
 
         Random random = new Random(studentID);
 
@@ -271,7 +267,6 @@ public class SchedulerSimulationSync {
         Map<Thread, Process> processMap = new HashMap<>();
         List<Process> allProcesses = new ArrayList<>();
 
-        // Print simulation header
         System.out.println("\n" + Colors.BOLD + Colors.BRIGHT_CYAN +
                 "╔═══════════════════════════════════════════════════════════════════════════════════════╗" +
                 Colors.RESET);
@@ -302,17 +297,15 @@ public class SchedulerSimulationSync {
                 "╚═══════════════════════════════════════════════════════════════════════════════════════╝" +
                 Colors.RESET + "\n");
 
-        // Create processes with priorities
         for (int i = 1; i <= numProcesses; i++) {
             int burstTime = timeQuantum / 2 + random.nextInt(2 * timeQuantum + 1);
-            int priority = 1 + random.nextInt(5); // Priority between 1 and 5
+            int priority = 1 + random.nextInt(5);
 
             Process process = new Process("P" + i, burstTime, timeQuantum, priority);
             allProcesses.add(process);
             addProcessToQueue(process, processQueue, processMap);
         }
 
-        // Start scheduler
         System.out.println(Colors.BOLD + Colors.GREEN +
                 "╔════════════════════════════════════════════════════════════════════════════════╗" +
                 Colors.RESET);
@@ -324,11 +317,9 @@ public class SchedulerSimulationSync {
                 "╚════════════════════════════════════════════════════════════════════════════════╝" +
                 Colors.RESET + "\n");
 
-        // Scheduler loop
         while (!processQueue.isEmpty()) {
             Thread currentThread = processQueue.poll();
 
-            // Display ready queue
             System.out.println(Colors.BOLD + Colors.MAGENTA + "┌─ Ready Queue " + "─".repeat(65) + Colors.RESET);
             System.out.print(Colors.MAGENTA + "│ " + Colors.RESET + Colors.BRIGHT_WHITE + "[" + Colors.RESET);
             int queueCount = 0;
@@ -367,7 +358,6 @@ public class SchedulerSimulationSync {
             }
         }
 
-        // Print statistics
         printStatistics(allProcesses, timeQuantum);
     }
 
@@ -396,8 +386,7 @@ public class SchedulerSimulationSync {
                 "╚════════════════════════════════════════════════════════════════════════════════╝" +
                 Colors.RESET + "\n");
 
-        // Print synchronization statistics
-        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "═══ Synchronization Statistics ═══" + Colors.RESET);
+        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "=== Synchronization Statistics ===" + Colors.RESET);
         System.out.println(Colors.YELLOW + "Total Context Switches: " + Colors.BRIGHT_YELLOW +
                 SharedResources.contextSwitchCount + Colors.RESET);
         System.out.println(Colors.YELLOW + "Total Completed Processes: " + Colors.BRIGHT_YELLOW +
@@ -408,11 +397,10 @@ public class SchedulerSimulationSync {
                 (SharedResources.totalWaitingTime / processes.size()) + "ms" + Colors.RESET);
         System.out.println();
 
-        // Print process summary table
-        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "═══ Process Summary Table ═══" + Colors.RESET);
+        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "=== Process Summary Table ===" + Colors.RESET);
         System.out.println(Colors.BOLD + String.format("%-10s %-12s %-12s %-12s",
                 "Process", "Priority", "Burst Time", "Waiting Time") + Colors.RESET);
-        System.out.println("─".repeat(48));
+        System.out.println("-".repeat(48));
 
         for (Process p : processes) {
             System.out.println(String.format("%-10s %-12d %-12d %-12d",
@@ -420,8 +408,7 @@ public class SchedulerSimulationSync {
         }
         System.out.println();
 
-        // Show execution log summary
-        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "═══ Execution Log Summary ═══" + Colors.RESET);
+        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "=== Execution Log Summary ===" + Colors.RESET);
         System.out.println(Colors.YELLOW + "Total log entries: " + Colors.BRIGHT_YELLOW +
                 SharedResources.executionLog.size() + Colors.RESET);
         System.out.println();
