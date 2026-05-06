@@ -40,13 +40,21 @@ class SharedResources {
     // Example: public static final ReentrantLock lock = new ReentrantLock();
     // Added lock for protecting shared counters
     public static final ReentrantLock counterLock = new ReentrantLock();
-
+    // Added lock for execution log
+    public static final ReentrantLock logLock = new ReentrantLock();
     // TODO #2: Add a Semaphore to limit concurrent process execution
     // Example: public static final Semaphore cpuSemaphore = new Semaphore(1);
 
     // Method to increment context switch counter
     public static void incrementContextSwitch() {
         // TODO: Protect this critical section with a lock
+        logLock.lock();
+        try {
+            executionLog.add(message);
+        } finally {
+            logLock.unlock();
+        }
+
         // RACE CONDITION: Multiple threads might read and write simultaneously!
         counterLock.lock();
         try {
